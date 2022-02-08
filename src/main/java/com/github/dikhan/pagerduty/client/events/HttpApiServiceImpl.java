@@ -1,22 +1,24 @@
 package com.github.dikhan.pagerduty.client.events;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dikhan.pagerduty.client.events.domain.ChangeEvent;
 import com.github.dikhan.pagerduty.client.events.domain.EventResult;
 import com.github.dikhan.pagerduty.client.events.domain.PagerDutyEvent;
 import com.github.dikhan.pagerduty.client.events.exceptions.NotifyEventException;
 import com.github.dikhan.pagerduty.client.events.utils.JsonUtils;
-import com.mashape.unirest.http.HttpResponse;
-import com.mashape.unirest.http.JsonNode;
-import com.mashape.unirest.http.Unirest;
-import com.mashape.unirest.http.exceptions.UnirestException;
-import com.mashape.unirest.request.HttpRequestWithBody;
-import org.apache.commons.io.IOUtils;
-import org.apache.http.HttpHost;
 import org.apache.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -39,28 +41,24 @@ public class HttpApiServiceImpl implements ApiService {
     private final String eventApi;
     private final String changeEventApi;
     private final boolean doRetries;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final HttpClient httpClient;
 
     public HttpApiServiceImpl(String eventApi, String changeEventApi, boolean doRetries) {
         this.eventApi = eventApi;
         this.changeEventApi = changeEventApi;
         this.doRetries = doRetries;
-        initUnirest();
+        this.httpClient = HttpClient.newHttpClient();
     }
 
     public HttpApiServiceImpl(String eventApi, String changeEventApi, String proxyHost, Integer proxyPort, boolean doRetries) {
         this.eventApi = eventApi;
         this.changeEventApi = changeEventApi;
         this.doRetries = doRetries;
-        initUnirestWithProxy(proxyHost, proxyPort);
-    }
-
-    private void initUnirest() {
-        Unirest.setObjectMapper(new JacksonObjectMapper());
-    }
-
-    private void initUnirestWithProxy(String proxyHost, Integer proxyPort) {
-        initUnirest();
-        Unirest.setProxy(new HttpHost(proxyHost, proxyPort));
+        this.httpClient = HttpClient
+                .newBuilder()
+                .proxy(ProxySelector.of(new InetSocketAddress(proxyHost, proxyPort)))
+                .build();
     }
 
     public EventResult notifyEvent(PagerDutyEvent event) throws NotifyEventException {
@@ -72,48 +70,53 @@ public class HttpApiServiceImpl implements ApiService {
 
     private EventResult notifyEvent(PagerDutyEvent event, String api, int retryCount) throws NotifyEventException {
         try {
-            HttpRequestWithBody request = Unirest.post(api)
+            String requestBody = objectMapper.writeValueAsString(event);
+
+            HttpRequest request = HttpRequest.newBuilder(URI.create(api))
                     .header("Content-Type", "application/json")
-                    .header("Accept", "application/json");
-            request.body(event);
-            HttpResponse<JsonNode> jsonResponse = request.asJson();
+                    .header("Accept", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+            JsonNode jsonResponse;
 
             if (log.isDebugEnabled()) {
-                log.debug(IOUtils.toString(jsonResponse.getRawBody()));
-                // A reset, so we can get the contents from the body that were dumped in the log before
-                jsonResponse.getRawBody().reset();
+                log.debug(response.body());
             }
 
-            int responseStatus = jsonResponse.getStatus();
+            int responseStatus = response.statusCode();
             switch(responseStatus) {
                 case HttpStatus.SC_OK:
                 case HttpStatus.SC_CREATED:
                 case HttpStatus.SC_ACCEPTED:
+                    jsonResponse = objectMapper.readValue(response.body(),JsonNode.class);
                     return EventResult.successEvent(JsonUtils.getPropertyValue(jsonResponse, "status"), JsonUtils.getPropertyValue(jsonResponse, "message"), JsonUtils.getPropertyValue(jsonResponse, "dedup_key"));
                 case HttpStatus.SC_BAD_REQUEST:
+                    jsonResponse = objectMapper.readValue(response.body(),JsonNode.class);
                     return EventResult.errorEvent(JsonUtils.getPropertyValue(jsonResponse, "status"), JsonUtils.getPropertyValue(jsonResponse, "message"), JsonUtils.getArrayValue(jsonResponse, "errors"));
                 case RATE_LIMIT_STATUS_CODE:
                 case HttpStatus.SC_INTERNAL_SERVER_ERROR:
                     if (doRetries) {
+                        jsonResponse = objectMapper.readValue(response.body(),JsonNode.class);
                         return handleRetries(event, api, retryCount, jsonResponse, responseStatus);
                     } else {
-                        return EventResult.errorEvent(String.valueOf(responseStatus), "", IOUtils.toString(jsonResponse.getRawBody()));
+                        return EventResult.errorEvent(String.valueOf(responseStatus), "", response.body());
                     }
                 default:
-                    return EventResult.errorEvent(String.valueOf(responseStatus), "", IOUtils.toString(jsonResponse.getRawBody()));
+                    return EventResult.errorEvent(String.valueOf(responseStatus), "", response.body());
             }
-        } catch (UnirestException | IOException e) {
+        } catch (IOException | InterruptedException e) {
             throw new NotifyEventException(e);
         }
     }
 
-    private EventResult handleRetries(PagerDutyEvent event, String api, int retryCount, HttpResponse<JsonNode> jsonResponse, int responseStatus) throws IOException, NotifyEventException {
+    private EventResult handleRetries(PagerDutyEvent event, String api, int retryCount, JsonNode jsonResponse, int responseStatus) throws IOException, NotifyEventException {
         long[] retryDelays = RETRY_WAIT_TIME_MILLISECONDS.get(responseStatus);
 
         int maxRetries = retryDelays.length;
         if (retryCount == maxRetries) {
             log.debug("Received a {} response. Exhausted all the possibilities to retry.", responseStatus);
-            return EventResult.errorEvent(String.valueOf(responseStatus), "", IOUtils.toString(jsonResponse.getRawBody()));
+            return EventResult.errorEvent(String.valueOf(responseStatus), "", objectMapper.writeValueAsString(jsonResponse));
         }
 
         log.debug("Received a {} response. Will retry again. ({}/{})", responseStatus, retryCount, maxRetries);

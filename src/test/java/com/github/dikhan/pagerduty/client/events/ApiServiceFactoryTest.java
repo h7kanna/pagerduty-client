@@ -1,6 +1,5 @@
 package com.github.dikhan.pagerduty.client.events;
 
-import com.mashape.unirest.http.Unirest;
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,8 +31,6 @@ public class ApiServiceFactoryTest {
         HttpApiServiceImpl httpApiService = new HttpApiServiceImpl(eventApi, changeEventApi, proxyHost, proxyPort, doRetries);
         assertThat(apiService).isExactlyInstanceOf(HttpApiServiceImpl.class);
         assertThat(apiService).isEqualTo(httpApiService);
-        // reset unirest settings
-        Unirest.setProxy(null);
     }
 
     @Test
@@ -49,7 +46,5 @@ public class ApiServiceFactoryTest {
         HttpApiServiceImpl httpApiService = new HttpApiServiceImpl(eventApi, changeEventApi, proxyHost, proxyPort, false);
         assertThat(apiService).isExactlyInstanceOf(HttpApiServiceImpl.class);
         assertThat(apiService).isEqualTo(httpApiService);
-        // reset unirest settings
-        Unirest.setProxy(null);
     }
 }

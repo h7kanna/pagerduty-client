@@ -28,10 +28,10 @@ public class HttpApiServiceImplTest {
     private final String MOCK_PAGER_DUTY_HOSTNAME = "localhost";
     private final int MOCK_PAGER_DUTY_PORT = mockServerRule.getPort();
 
-    private final String EVENT_END_POINT = "/v2/enqueue";
+    private final String EVENT_END_POINT = "v2/enqueue";
     private final String EVENT_API = "http://" + MOCK_PAGER_DUTY_HOSTNAME + ":" + MOCK_PAGER_DUTY_PORT + "/" + EVENT_END_POINT;
 
-    private final String CHANGE_EVENT_END_POINT = "/v2/change/enqueue";
+    private final String CHANGE_EVENT_END_POINT = "v2/change/enqueue";
     private final String CHANGE_EVENT_API = "http://" + MOCK_PAGER_DUTY_HOSTNAME + ":" + MOCK_PAGER_DUTY_PORT + "/" + CHANGE_EVENT_END_POINT;
 
     private HttpApiServiceImpl httpApiServiceImpl;

@@ -1,21 +1,20 @@
 package com.github.dikhan.pagerduty.client.events.utils;
 
-import com.mashape.unirest.http.HttpResponse;
-import com.mashape.unirest.http.JsonNode;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public class JsonUtils {
 
-    public static String getPropertyValue(HttpResponse<JsonNode> jsonResponse, String key) {
-        if (jsonResponse.getBody().getObject().has(key)) {
-            return jsonResponse.getBody().getObject().getString(key);
+    public static String getPropertyValue(JsonNode jsonResponse, String key) {
+        if (jsonResponse.has(key)) {
+            return jsonResponse.get(key).asText();
         }
 
         return null;
     }
 
-    public static String getArrayValue(HttpResponse<JsonNode> jsonResponse, String key) {
-        if (jsonResponse.getBody().getObject().has(key)) {
-            return jsonResponse.getBody().getObject().getJSONArray(key).toString();
+    public static String getArrayValue(JsonNode jsonResponse, String key) {
+        if (jsonResponse.has(key) && jsonResponse.get(key).isArray()) {
+            return jsonResponse.get(key).toString();
         }
 
         return null;
